@@ -2,52 +2,30 @@
 
 #define MPU 0x68
 
-// ======================================================
-// MOTOR PINS
-// ======================================================
-
+// Motor driver pins
 #define IN1 27
 #define IN2 26
 #define IN3 25
 #define IN4 33
 
-// ======================================================
-// MPU VARIABLES
-// ======================================================
-
+// MPU6050 data
 float AccAngle = 0;
 float GyroRate = 0;
 float Angle = 0;
 
-// ======================================================
-// FILTERED GYRO
-// ======================================================
-
+// Smoothed gyro value
 float filteredGyro = 0;
 
-// ======================================================
-// GYRO OFFSET
-// ======================================================
-
+// Gyro calibration offset
 float GyroErrorX = 0;
 
-// ======================================================
-// CONTROL VALUES
-// ======================================================
-
+// Control constants
 float Kp = 55.0;
 float Kd = 2.5;
 
-// ======================================================
-// OUTPUT
-// ======================================================
-
 float output = 0;
 
-// ======================================================
-// TIMING
-// ======================================================
-
+// Timing variables
 unsigned long previousTime = 0;
 float dt = 0;
 
@@ -55,10 +33,7 @@ void setup() {
 
   Serial.begin(115200);
 
-  // ======================================================
-  // MOTOR SETUP
-  // ======================================================
-
+  // Motor setup
   pinMode(IN1, OUTPUT);
   pinMode(IN2, OUTPUT);
   pinMode(IN3, OUTPUT);
@@ -69,10 +44,7 @@ void setup() {
   analogWrite(IN3, 0);
   analogWrite(IN4, 0);
 
-  // ======================================================
-  // MPU6050 SETUP
-  // ======================================================
-
+  // MPU6050 setup
   Wire.begin(21, 22);
 
   Wire.beginTransmission(MPU);
@@ -82,12 +54,8 @@ void setup() {
 
   delay(1000);
 
-  // ======================================================
-  // GYRO CALIBRATION
-  // KEEP ROBOT STILL
-  // ======================================================
-
-  Serial.println("KEEP ROBOT STILL");
+  // Calibrate gyro while robot is standing still
+  Serial.println("Calibrating gyro... Keep robot still");
 
   for (int i = 0; i < 800; i++) {
 
@@ -106,20 +74,17 @@ void setup() {
 
   GyroErrorX /= 800;
 
-  Serial.print("GYRO OFFSET: ");
+  Serial.print("Gyro Offset: ");
   Serial.println(GyroErrorX);
 
   previousTime = micros();
 
-  Serial.println("BALANCING STARTED");
+  Serial.println("Balancing Started");
 }
 
 void loop() {
 
-  // ======================================================
-  // TIME
-  // ======================================================
-
+  // Calculate loop time
   unsigned long currentTime = micros();
 
   dt = (currentTime - previousTime) / 1000000.0;
@@ -130,10 +95,7 @@ void loop() {
     dt = 0.001;
   }
 
-  // ======================================================
-  // MPU READ
-  // ======================================================
-
+  // Read accelerometer and gyro data
   Wire.beginTransmission(MPU);
   Wire.write(0x3B);
   Wire.endTransmission(false);
@@ -150,56 +112,37 @@ void loop() {
 
   int16_t GyX = Wire.read() << 8 | Wire.read();
 
-  // ======================================================
-  // ANGLE CALCULATION
-  // ======================================================
-
+  // Calculate tilt angle and gyro rate
   AccAngle = atan2(AcX, AcZ) * 180 / PI;
 
   GyroRate = (GyX / 131.0) - GyroErrorX;
 
-  // ======================================================
-  // FASTER GYRO RESPONSE
-  // ======================================================
-
+  // Smooth gyro readings for faster but stable response
   filteredGyro =
-      0.4 * filteredGyro
-    + 0.6 * GyroRate;
+      0.4 * filteredGyro +
+      0.6 * GyroRate;
 
-  // ======================================================
-  // COMPLEMENTARY FILTER
-  // TRUST GYRO MORE FOR FASTER PREDICTION
-  // ======================================================
-
+  // Complementary filter
   Angle =
-      0.992 * (Angle + filteredGyro * dt)
-    + 0.008 * AccAngle;
+      0.992 * (Angle + filteredGyro * dt) +
+      0.008 * AccAngle;
 
-  // ======================================================
-  // PREDICTIVE CONTROL
-  // ======================================================
-
+  // Use both angle and gyro rate to predict falling direction
   output =
-      (Kp * Angle)
-    + (Kd * filteredGyro);
+      (Kp * Angle) +
+      (Kd * filteredGyro);
 
   output = constrain(output, -255, 255);
 
-  // ======================================================
-  // NO RANDOM JITTER
-  // ======================================================
-
+  // Ignore tiny movements near the balance point
   if (abs(Angle) < 0.25 &&
       abs(filteredGyro) < 0.8) {
 
     output = 0;
   }
 
-  // ======================================================
-  // FAST INITIAL KICK
-  // FOR HEAVY ROBOT INERTIA
-  // ======================================================
-
+  // Give motors an extra kick when the robot starts falling.
+  // Helps overcome motor deadzone and chassis inertia.
   if (abs(Angle) > 1.2 &&
       abs(Angle) < 10) {
 
@@ -210,18 +153,11 @@ void loop() {
       output -= 85;
   }
 
-  // ======================================================
-  // SPEED
-  // ======================================================
-
   int speed = abs(output);
 
   speed = constrain(speed, 0, 255);
 
-  // ======================================================
-  // SAFETY STOP
-  // ======================================================
-
+  // Stop motors if the robot has already fallen over
   if (abs(Angle) > 45) {
 
     analogWrite(IN1, 0);
@@ -233,10 +169,7 @@ void loop() {
     return;
   }
 
-  // ======================================================
-  // DEBUG
-  // ======================================================
-
+  // Debug values
   Serial.print("Angle: ");
   Serial.print(Angle);
 
@@ -246,14 +179,8 @@ void loop() {
   Serial.print(" | Output: ");
   Serial.println(output);
 
-  // ======================================================
-  // MOTOR CONTROL
-  // FALL FORWARD -> MOVE FORWARD
-  // ======================================================
-
+  // Drive motors
   if (output > 0) {
-
-    // FORWARD
 
     analogWrite(IN1, 0);
     analogWrite(IN2, speed);
@@ -264,18 +191,12 @@ void loop() {
   }
   else {
 
-    // BACKWARD
-
     analogWrite(IN1, speed);
     analogWrite(IN2, 0);
 
     analogWrite(IN3, speed);
     analogWrite(IN4, 0);
   }
-
-  // ======================================================
-  // LOOP SPEED
-  // ======================================================
 
   delayMicroseconds(1000);
 }
